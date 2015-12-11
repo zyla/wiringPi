@@ -405,7 +405,7 @@ extern int  lcdNew (const int rows, const int cols, const int bits,
 
   lcd->rsPin   = rs ;
   lcd->strbPin = strb ;
-  lcd->bits    = 8 ;		// For now - we'll set it properly later.
+  lcd->bits    = bits ;
   lcd->rows    = rows ;
   lcd->cols    = cols ;
   lcd->cx      = 0 ;
