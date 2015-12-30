@@ -435,25 +435,9 @@ extern int  lcdNew (const int rows, const int cols, const int bits,
   return lcdFd ;
 }
 
-/*
- * lcdInit:
- *	Take a lot of parameters and initialise the LCD, and return a handle to
- *	that LCD, or -1 if any error.
- *********************************************************************************
- */
-
-int lcdInit (const int rows, const int cols, const int bits,
-	const int rs, const int strb,
-	const int d0, const int d1, const int d2, const int d3, const int d4,
-	const int d5, const int d6, const int d7)
-{
+void lcdReinit(int lcdFd) {
   unsigned char func ;
-  struct lcdDataStruct *lcd ;
-  int lcdFd = lcdNew(rows, cols, bits, rs, strb, d0, d1, d2, d3, d4, d5, d6, d7);
-
-  if(lcdFd < 0)
-      return -1;
-
+  struct lcdDataStruct *lcd;
   lcd = lcds[lcdFd];
 
 // 4-bit mode?
@@ -471,7 +455,7 @@ int lcdInit (const int rows, const int cols, const int bits,
 //	then can you flip the switch for the rest of the library to work in 4-bit
 //	mode which sends the commands as 2 x 4-bit values.
 
-  if (bits == 4)
+  if (lcd->bits == 4)
   {
     func = LCD_FUNC | LCD_FUNC_DL ;			// Set 8-bit mode 3 times
     put4Command (lcd, func >> 4) ; delay (35) ;
@@ -479,7 +463,6 @@ int lcdInit (const int rows, const int cols, const int bits,
     put4Command (lcd, func >> 4) ; delay (35) ;
     func = LCD_FUNC ;					// 4th set: 4-bit mode
     put4Command (lcd, func >> 4) ; delay (35) ;
-    lcd->bits = 4 ;
   }
   else
   {
@@ -504,6 +487,26 @@ int lcdInit (const int rows, const int cols, const int bits,
 
   putCommand (lcd, LCD_ENTRY   | LCD_ENTRY_ID) ;
   putCommand (lcd, LCD_CDSHIFT | LCD_CDSHIFT_RL) ;
+}
 
-  return lcdFd ;
+/*
+ * lcdInit:
+ *	Take a lot of parameters and initialise the LCD, and return a handle to
+ *	that LCD, or -1 if any error.
+ *********************************************************************************
+ */
+
+int lcdInit (const int rows, const int cols, const int bits,
+	const int rs, const int strb,
+	const int d0, const int d1, const int d2, const int d3, const int d4,
+	const int d5, const int d6, const int d7)
+{
+  int lcdFd = lcdNew(rows, cols, bits, rs, strb, d0, d1, d2, d3, d4, d5, d6, d7);
+
+  if(lcdFd < 0)
+      return -1;
+
+  lcdReinit(lcdFd);
+
+  return lcdFd;
 }

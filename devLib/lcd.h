@@ -41,6 +41,7 @@ extern void lcdCharDef     (const int fd, int index, unsigned char data [8]) ;
 extern void lcdPutchar     (const int fd, unsigned char data) ;
 extern void lcdPuts        (const int fd, const char *string) ;
 extern void lcdPrintf      (const int fd, const char *message, ...) ;
+extern void lcdReinit       (const int fd) ;
 
 extern int  lcdInit (const int rows, const int cols, const int bits,
 	const int rs, const int strb,
