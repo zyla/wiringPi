@@ -43,14 +43,14 @@ extern void lcdPuts        (const int fd, const char *string) ;
 extern void lcdPrintf      (const int fd, const char *message, ...) ;
 extern void lcdReinit       (const int fd) ;
 
-extern int  lcdInit (const int rows, const int cols, const int bits,
+extern int  lcdInit (const int rows, const int cols, const int i2c_addr, const int bits,
 	const int rs, const int strb,
 	const int d0, const int d1, const int d2, const int d3, const int d4,
 	const int d5, const int d6, const int d7) ;
 
 // Create a new LCD handle without sending any commands to it.
 // Assume it's already initialized to 4-bit mode.
-extern int  lcdNew (const int rows, const int cols, const int bits,
+extern int  lcdNew (const int rows, const int cols, const int i2c_addr, const int bits,
 	const int rs, const int strb,
 	const int d0, const int d1, const int d2, const int d3, const int d4,
 	const int d5, const int d6, const int d7);

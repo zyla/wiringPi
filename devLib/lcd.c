@@ -29,6 +29,7 @@
 #include <stdarg.h>
 
 #include <wiringPi.h>
+#include <wiringPiI2C.h>
 
 #include "lcd.h"
 
@@ -67,12 +68,16 @@
 
 #define	LCD_CDSHIFT_RL	0x04
 
+// TODO: move to a parameter
+#define I2C_BACKLIGHT 0x08
+
 struct lcdDataStruct
 {
   int bits, rows, cols ;
   int rsPin, strbPin ;
   int dataPins [8] ;
   int cx, cy ;
+  int i2c_fd;
 } ;
 
 struct lcdDataStruct *lcds [MAX_LCDS] ;
@@ -101,43 +106,75 @@ static void strobe (const struct lcdDataStruct *lcd)
 }
 
 
+static void i2c_send (const struct lcdDataStruct *lcd, unsigned char output)
+{
+  wiringPiI2CWrite(lcd->i2c_fd, output | (1 << lcd->strbPin) | I2C_BACKLIGHT);
+  delayMicroseconds(50);
+  wiringPiI2CWrite(lcd->i2c_fd, output | I2C_BACKLIGHT);
+  delayMicroseconds(50);
+}
+
+static unsigned char marshal4Bits(const struct lcdDataStruct *lcd, unsigned char data) {
+  unsigned char i;
+  unsigned char myData = data ;
+  unsigned char output = 0;
+
+  for (i = 0 ; i < 4 ; ++i)
+  {
+    output |= (myData & 1) << lcd->dataPins[i];
+    myData >>= 1 ;
+  }
+
+  return output;
+}
+
+
 /*
  * sentDataCmd:
  *	Send an data or command byte to the display.
  *********************************************************************************
  */
 
-static void sendDataCmd (const struct lcdDataStruct *lcd, unsigned char data)
+static void sendDataCmd (const struct lcdDataStruct *lcd, unsigned char data, unsigned char rs)
 {
   register unsigned char myData = data ;
   unsigned char          i, d4 ;
 
-  if (lcd->bits == 4)
-  {
-    d4 = (myData >> 4) & 0x0F;
-    for (i = 0 ; i < 4 ; ++i)
+  if(lcd->i2c_fd) {
+
+    i2c_send(lcd, marshal4Bits(lcd, (data >> 4) & 0xf) | (rs << lcd->rsPin));
+    i2c_send(lcd, marshal4Bits(lcd,  data       & 0xf) | (rs << lcd->rsPin));
+
+  } else {
+    digitalWrite (lcd->rsPin, rs) ;
+
+    if (lcd->bits == 4)
     {
-      digitalWrite (lcd->dataPins [i], (d4 & 1)) ;
-      d4 >>= 1 ;
+      d4 = (myData >> 4) & 0x0F;
+      for (i = 0 ; i < 4 ; ++i)
+      {
+        digitalWrite (lcd->dataPins [i], (d4 & 1)) ;
+        d4 >>= 1 ;
+      }
+      strobe (lcd) ;
+
+      d4 = myData & 0x0F ;
+      for (i = 0 ; i < 4 ; ++i)
+      {
+        digitalWrite (lcd->dataPins [i], (d4 & 1)) ;
+        d4 >>= 1 ;
+      }
+    }
+    else
+    {
+      for (i = 0 ; i < 8 ; ++i)
+      {
+        digitalWrite (lcd->dataPins [i], (myData & 1)) ;
+        myData >>= 1 ;
+      }
     }
     strobe (lcd) ;
-
-    d4 = myData & 0x0F ;
-    for (i = 0 ; i < 4 ; ++i)
-    {
-      digitalWrite (lcd->dataPins [i], (d4 & 1)) ;
-      d4 >>= 1 ;
-    }
   }
-  else
-  {
-    for (i = 0 ; i < 8 ; ++i)
-    {
-      digitalWrite (lcd->dataPins [i], (myData & 1)) ;
-      myData >>= 1 ;
-    }
-  }
-  strobe (lcd) ;
 }
 
 
@@ -149,8 +186,7 @@ static void sendDataCmd (const struct lcdDataStruct *lcd, unsigned char data)
 
 static void putCommand (const struct lcdDataStruct *lcd, unsigned char command)
 {
-  digitalWrite (lcd->rsPin,   0) ;
-  sendDataCmd  (lcd, command) ;
+  sendDataCmd  (lcd, command, 0) ;
   delay (2) ;
 }
 
@@ -159,14 +195,18 @@ static void put4Command (const struct lcdDataStruct *lcd, unsigned char command)
   register unsigned char myCommand = command ;
   register unsigned char i ;
 
-  digitalWrite (lcd->rsPin,   0) ;
+  if(lcd->i2c_fd) {
+    i2c_send(lcd, marshal4Bits(lcd, command));
+  } else {
+    digitalWrite (lcd->rsPin,   0) ;
 
-  for (i = 0 ; i < 4 ; ++i)
-  {
-    digitalWrite (lcd->dataPins [i], (myCommand & 1)) ;
-    myCommand >>= 1 ;
+    for (i = 0 ; i < 4 ; ++i)
+    {
+      digitalWrite (lcd->dataPins [i], (myCommand & 1)) ;
+      myCommand >>= 1 ;
+    }
+    strobe (lcd) ;
   }
-  strobe (lcd) ;
 }
 
 
@@ -294,9 +334,8 @@ void lcdCharDef (const int fd, int index, unsigned char data [8])
 
   putCommand (lcd, LCD_CGRAM | ((index & 7) << 3)) ;
 
-  digitalWrite (lcd->rsPin, 1) ;
   for (i = 0 ; i < 8 ; ++i)
-    sendDataCmd (lcd, data [i]) ;
+    sendDataCmd (lcd, data [i], 1) ;
 }
 
 
@@ -311,8 +350,7 @@ void lcdPutchar (const int fd, unsigned char data)
 {
   struct lcdDataStruct *lcd = lcds [fd] ;
 
-  digitalWrite (lcd->rsPin, 1) ;
-  sendDataCmd  (lcd, data) ;
+  sendDataCmd  (lcd, data, 1) ;
 
   if (++lcd->cx == lcd->cols)
   {
@@ -356,7 +394,7 @@ void lcdPrintf (const int fd, const char *message, ...)
   lcdPuts (fd, buffer) ;
 }
 
-extern int  lcdNew (const int rows, const int cols, const int bits,
+extern int  lcdNew (const int rows, const int cols, const int i2c_addr, const int bits,
 	const int rs, const int strb,
 	const int d0, const int d1, const int d2, const int d3, const int d4,
 	const int d5, const int d6, const int d7)
@@ -420,15 +458,26 @@ extern int  lcdNew (const int rows, const int cols, const int bits,
   lcd->dataPins [6] = d6 ;
   lcd->dataPins [7] = d7 ;
 
+  if(i2c_addr) {
+    lcd->i2c_fd = wiringPiI2CSetup(i2c_addr);
+    // TODO error handling
+  } else {
+    lcd->i2c_fd = 0;
+  }
+
   lcds [lcdFd] = lcd ;
 
-  digitalWrite (lcd->rsPin,   0) ; pinMode (lcd->rsPin,   OUTPUT) ;
-  digitalWrite (lcd->strbPin, 0) ; pinMode (lcd->strbPin, OUTPUT) ;
+  if(lcd->i2c_fd) {
+    wiringPiI2CWrite(lcd->i2c_fd, I2C_BACKLIGHT);
+  } else {
+    digitalWrite (lcd->rsPin,   0) ; pinMode (lcd->rsPin,   OUTPUT) ;
+    digitalWrite (lcd->strbPin, 0) ; pinMode (lcd->strbPin, OUTPUT) ;
 
-  for (i = 0 ; i < bits ; ++i)
-  {
-    digitalWrite (lcd->dataPins [i], 0) ;
-    pinMode      (lcd->dataPins [i], OUTPUT) ;
+    for (i = 0 ; i < bits ; ++i)
+    {
+      digitalWrite (lcd->dataPins [i], 0) ;
+      pinMode      (lcd->dataPins [i], OUTPUT) ;
+    }
   }
   delay (35) ; // mS
 
@@ -496,12 +545,12 @@ void lcdReinit(int lcdFd) {
  *********************************************************************************
  */
 
-int lcdInit (const int rows, const int cols, const int bits,
+int lcdInit (const int rows, const int cols, const int i2c_addr, const int bits,
 	const int rs, const int strb,
 	const int d0, const int d1, const int d2, const int d3, const int d4,
 	const int d5, const int d6, const int d7)
 {
-  int lcdFd = lcdNew(rows, cols, bits, rs, strb, d0, d1, d2, d3, d4, d5, d6, d7);
+  int lcdFd = lcdNew(rows, cols, i2c_addr, bits, rs, strb, d0, d1, d2, d3, d4, d5, d6, d7);
 
   if(lcdFd < 0)
       return -1;
