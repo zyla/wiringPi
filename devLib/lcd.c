@@ -68,8 +68,7 @@
 
 #define	LCD_CDSHIFT_RL	0x04
 
-// TODO: move to a parameter
-#define I2C_BACKLIGHT 0x08
+#define LCD_BACKLIGHT(lcd) ((lcd)->backlight_state? 1 << (lcd)->backlight_bit: 0)
 
 struct lcdDataStruct
 {
@@ -78,6 +77,8 @@ struct lcdDataStruct
   int dataPins [8] ;
   int cx, cy ;
   int i2c_fd;
+  int backlight_bit;
+  int backlight_state;
 } ;
 
 struct lcdDataStruct *lcds [MAX_LCDS] ;
@@ -108,9 +109,9 @@ static void strobe (const struct lcdDataStruct *lcd)
 
 static void i2c_send (const struct lcdDataStruct *lcd, unsigned char output)
 {
-  wiringPiI2CWrite(lcd->i2c_fd, output | (1 << lcd->strbPin) | I2C_BACKLIGHT);
+  wiringPiI2CWrite(lcd->i2c_fd, output | (1 << lcd->strbPin) | LCD_BACKLIGHT(lcd));
   delayMicroseconds(50);
-  wiringPiI2CWrite(lcd->i2c_fd, output | I2C_BACKLIGHT);
+  wiringPiI2CWrite(lcd->i2c_fd, output | LCD_BACKLIGHT(lcd));
   delayMicroseconds(50);
 }
 
@@ -394,10 +395,7 @@ void lcdPrintf (const int fd, const char *message, ...)
   lcdPuts (fd, buffer) ;
 }
 
-extern int  lcdNew (const int rows, const int cols, const int i2c_addr, const int bits,
-	const int rs, const int strb,
-	const int d0, const int d1, const int d2, const int d3, const int d4,
-	const int d5, const int d6, const int d7)
+extern int  lcdNew (const struct lcd_config *config)
 {
   static int initialised = 0 ;
 
@@ -414,13 +412,13 @@ extern int  lcdNew (const int rows, const int cols, const int i2c_addr, const in
 
 // Simple sanity checks
 
-  if (! ((bits == 4) || (bits == 8)))
+  if (! ((config->bits == 4) || (config->bits == 8)))
     return -1 ;
 
-  if ((rows < 0) || (rows > 20))
+  if ((config->rows < 0) || (config->rows > 20))
     return -1 ;
 
-  if ((cols < 0) || (cols > 20))
+  if ((config->cols < 0) || (config->cols > 20))
     return -1 ;
 
 // Create a new LCD:
@@ -441,25 +439,28 @@ extern int  lcdNew (const int rows, const int cols, const int i2c_addr, const in
   if (lcd == NULL)
     return -1 ;
 
-  lcd->rsPin   = rs ;
-  lcd->strbPin = strb ;
-  lcd->bits    = bits ;
-  lcd->rows    = rows ;
-  lcd->cols    = cols ;
+  lcd->rsPin   = config->rs ;
+  lcd->strbPin = config->strb ;
+  lcd->bits    = config->bits ;
+  lcd->rows    = config->rows ;
+  lcd->cols    = config->cols ;
   lcd->cx      = 0 ;
   lcd->cy      = 0 ;
 
-  lcd->dataPins [0] = d0 ;
-  lcd->dataPins [1] = d1 ;
-  lcd->dataPins [2] = d2 ;
-  lcd->dataPins [3] = d3 ;
-  lcd->dataPins [4] = d4 ;
-  lcd->dataPins [5] = d5 ;
-  lcd->dataPins [6] = d6 ;
-  lcd->dataPins [7] = d7 ;
+  lcd->dataPins [0] = config->d0 ;
+  lcd->dataPins [1] = config->d1 ;
+  lcd->dataPins [2] = config->d2 ;
+  lcd->dataPins [3] = config->d3 ;
+  lcd->dataPins [4] = config->d4 ;
+  lcd->dataPins [5] = config->d5 ;
+  lcd->dataPins [6] = config->d6 ;
+  lcd->dataPins [7] = config->d7 ;
 
-  if(i2c_addr) {
-    lcd->i2c_fd = wiringPiI2CSetup(i2c_addr);
+  lcd->backlight_bit = config->backlight;
+  lcd->backlight_state = config->backlight_state;
+
+  if(config->i2c_addr) {
+    lcd->i2c_fd = wiringPiI2CSetup(config->i2c_addr);
     // TODO error handling
   } else {
     lcd->i2c_fd = 0;
@@ -468,12 +469,12 @@ extern int  lcdNew (const int rows, const int cols, const int i2c_addr, const in
   lcds [lcdFd] = lcd ;
 
   if(lcd->i2c_fd) {
-    wiringPiI2CWrite(lcd->i2c_fd, I2C_BACKLIGHT);
+    wiringPiI2CWrite(lcd->i2c_fd, LCD_BACKLIGHT(lcd));
   } else {
     digitalWrite (lcd->rsPin,   0) ; pinMode (lcd->rsPin,   OUTPUT) ;
     digitalWrite (lcd->strbPin, 0) ; pinMode (lcd->strbPin, OUTPUT) ;
 
-    for (i = 0 ; i < bits ; ++i)
+    for (i = 0 ; i < lcd->bits ; ++i)
     {
       digitalWrite (lcd->dataPins [i], 0) ;
       pinMode      (lcd->dataPins [i], OUTPUT) ;
@@ -545,12 +546,9 @@ void lcdReinit(int lcdFd) {
  *********************************************************************************
  */
 
-int lcdInit (const int rows, const int cols, const int i2c_addr, const int bits,
-	const int rs, const int strb,
-	const int d0, const int d1, const int d2, const int d3, const int d4,
-	const int d5, const int d6, const int d7)
+int lcdInit (const struct lcd_config *config)
 {
-  int lcdFd = lcdNew(rows, cols, i2c_addr, bits, rs, strb, d0, d1, d2, d3, d4, d5, d6, d7);
+  int lcdFd = lcdNew(config);
 
   if(lcdFd < 0)
       return -1;
@@ -558,4 +556,21 @@ int lcdInit (const int rows, const int cols, const int i2c_addr, const int bits,
   lcdReinit(lcdFd);
 
   return lcdFd;
+}
+
+/*
+ * lcdBacklight:
+ * Change backlight state of the display
+ *********************************************************************************
+ */
+
+void lcdBacklight(const int fd, int state)
+{
+  struct lcdDataStruct *lcd = lcds [fd] ;
+
+  lcd->backlight_state = state;
+
+  if(lcd->i2c_fd) {
+    wiringPiI2CWrite(lcd->i2c_fd, LCD_BACKLIGHT(lcd));
+  }
 }
